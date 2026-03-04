@@ -56,7 +56,7 @@ impl BumpAllocator {
     }
 
     /// Reset the allocator (free all allocated memory).
-    pub fn reset(&self) {
+    pub fn reset(&self) {  
         self.next.store(self.heap_start, Ordering::SeqCst);
     }
 }
