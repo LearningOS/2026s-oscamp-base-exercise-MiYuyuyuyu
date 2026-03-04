@@ -31,6 +31,7 @@
 //! Each function includes a `TODO` comment indicating where you need to write code.
 //! Run `cargo test` to check your implementations.
 
+use std::env::args;
 use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
 
@@ -53,7 +54,15 @@ pub fn run_command(program: &str, args: &[&str]) -> String {
     // TODO: Set stdout to Stdio::piped()
     // TODO: Execute with .output() and get output
     // TODO: Convert stdout to String and return
-    todo!()
+    let child = std::process::Command::new(program)
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("err in create child");
+    let output = child.wait_with_output().expect("wait err");
+    let ans = String::from_utf8_lossy(&output.stdout).to_string();
+    ans
 }
 
 /// Write data to child process (cat) stdin via pipe and read its stdout output.
@@ -89,7 +98,17 @@ pub fn pipe_through_cat(input: &str) -> String {
     // TODO: Write input to child process stdin
     // TODO: Drop stdin to close pipe (otherwise cat won't exit)
     // TODO: Read output from child process stdout
-    todo!()
+    let mut child = std::process::Command::new("cat")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("create child err");
+    let mut stdin = child.stdin.take().expect("none stdin");
+    stdin.write_all(input.as_bytes()).expect("write err");
+    drop(stdin);
+    let output = child.wait_with_output().expect("wait err");
+    let ans = String::from_utf8_lossy(&output.stdout).to_string();
+    ans
 }
 
 /// Get child process exit code.
@@ -109,8 +128,25 @@ pub fn pipe_through_cat(input: &str) -> String {
 pub fn get_exit_code(command: &str) -> i32 {
     // TODO: Use Command::new("sh").args(["-c", command])
     // TODO: Execute and get status
-    // TODO: Return exit code
-    todo!()
+    // TODO: Return exit code]
+    let mut child = std::process::Command::new("sh")
+        .args(["-c",command])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let output= child.wait();
+
+        match output {
+            Ok(status) => {
+                // 返回退出码
+                return status.code().unwrap_or(127)  // 如果进程被信号终止，返回默认值
+            }
+            Err(_) => {
+                // 如果执行失败（如命令不存在），返回一个非0的退出码
+                return 127;
+            }
+        }
 }
 
 /// Execute the given shell command and return its stdout output as a `Result`.
@@ -137,7 +173,20 @@ pub fn run_command_with_result(program: &str, args: &[&str]) -> io::Result<Strin
     // TODO: Set stdout to Stdio::piped()
     // TODO: Execute with .output() and handle Result
     // TODO: Convert stdout to String with from_utf8, mapping errors to io::Error
-    todo!()
+    let output = Command::new(program)
+        .args(args)
+        .stdout(Stdio::piped())
+        .output()?;
+    let ans = String::from_utf8(output.stdout);
+    // return Ok(ans.);
+    match ans {
+        Ok(str)=>{
+            return Ok(str);
+        },
+        Err(err)=>{
+            return Err(io::Error::new(io::ErrorKind::InvalidData, err));
+        }
+    }
 }
 
 /// Interact with `grep` via bidirectional pipes, filtering lines that contain a pattern.
@@ -167,7 +216,17 @@ pub fn pipe_through_grep(pattern: &str, input: &str) -> String {
     // TODO: Drop stdin to close pipe
     // TODO: Read output from child stdout line by line
     // TODO: Collect and return matching lines
-    todo!()
+    let mut child = std::process::Command::new("grep")
+        .arg(pattern)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(input.as_bytes()).unwrap();
+    drop(stdin);
+    let x = child.wait_with_output().unwrap();
+    return String::from_utf8_lossy(&x.stdout).to_string();
 }
 
 #[cfg(test)]
