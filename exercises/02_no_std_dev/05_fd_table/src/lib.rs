@@ -51,13 +51,20 @@ pub struct FdTable {
     // TODO: Design the internal structure
     // Hint: use Vec<Option<Arc<dyn File>>>
     //       the index is the fd number, None means the fd is closed or unallocated
+    // TODO: 设计内部结构
+    // 提示: 使用 Vec<Option<Arc<dyn File>>>
+    // 索引是 fd 编号，None 表示该 fd 已关闭或未分配
+    fds :  Vec<Option<Arc<dyn File>>>
 }
 
 impl FdTable {
     /// Create an empty fd table
     pub fn new() -> Self {
         // TODO
-        todo!()
+        // todo!()
+        Self { 
+            fds: Vec::new()
+        }
     }
 
     /// Allocate a new fd, return the fd number.
@@ -65,25 +72,52 @@ impl FdTable {
     /// Prefers reusing the smallest closed fd number; if no free slot, appends to the end.
     pub fn alloc(&mut self, file: Arc<dyn File>) -> usize {
         // TODO
-        todo!()
+        // todo!()
+        for (i,fd) in self.fds.iter().enumerate() {
+            if fd.is_none() {
+                self.fds[i] = Some(file);
+                return i;
+            }
+        }
+        self.fds.push(Some(file));
+        return self.fds.len() - 1;
     }
 
     /// Get the file object for an fd. Returns None if the fd doesn't exist or is closed.
     pub fn get(&self, fd: usize) -> Option<Arc<dyn File>> {
         // TODO
-        todo!()
+        // todo!()
+        if self.fds.len() > fd {
+            return self.fds[fd].clone();
+        }
+        else {
+            return None;
+        }
     }
 
     /// Close an fd. Returns true on success, false if the fd doesn't exist or is already closed.
     pub fn close(&mut self, fd: usize) -> bool {
         // TODO
-        todo!()
+        if self.fds.len() > fd {
+            self.fds[fd] = None;
+            return true;
+        }else {
+            return false;
+        }
+        // todo!()
     }
 
     /// Return the number of currently allocated fds (excluding closed ones)
     pub fn count(&self) -> usize {
         // TODO
-        todo!()
+        // todo!()
+        self.fds.iter().fold(0_usize, |i,k| 
+            if k.is_none() {
+                i
+            }else {
+                i + 1
+            }
+        )
     }
 }
 
