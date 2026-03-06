@@ -104,88 +104,89 @@ impl FreeListAllocator {
 
 unsafe impl GlobalAlloc for FreeListAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        // Ensure block is at least large enough to hold a FreeBlock header
+        // Ensure block is at least large enough to hold a FreeBlock header (for future dealloc)
         let size = layout.size().max(core::mem::size_of::<FreeBlock>());
         let align = layout.align().max(core::mem::align_of::<FreeBlock>());
 
-        // Step 1: traverse free_list, find a suitable block (first-fit)
-        let mut prev_ptr: *mut *mut FreeBlock = &mut self.free_list_head() as *mut _ as _;
-        let mut curr = self.free_list_head();
+        // TODO: Step 1 — traverse free_list, find a suitable block (first-fit)
+        //
+        // Hints:
+        // - Use prev_ptr and curr to traverse the list
+        // - Check if curr address satisfies align, and (*curr).size >= size
+        // - If found, remove it from the list (update prev's next or the free_list head)
+        // - Return curr as *mut u8
 
-        while !curr.is_null() {
-            let block_start = curr as usize;
+        let mut current: *mut FreeBlock = self.free_list_head();
+        let mut prev: *mut FreeBlock = null_mut();
+        while !current.is_null() {
+            let current_addr = current as usize;
+            let align_addr = (current_addr + align - 1) & !(align - 1);
+            // 检查对齐后的地址是否仍在块的范围内
+            let offset_to_aligned = align_addr - current_addr;
             
-            // Calculate aligned user start address
-            let align_mask = align - 1;
-            let user_start = (block_start + core::mem::size_of::<FreeBlock>() + align_mask) & !align_mask;
-            let padding = user_start - (block_start + core::mem::size_of::<FreeBlock>());
-            let total_needed = core::mem::size_of::<FreeBlock>() + padding + size;
-
-            if (*curr).size >= total_needed {
-                // Found a suitable block
-                if (*curr).size >= total_needed + core::mem::size_of::<FreeBlock>() {
-                    // Split the block: remaining part becomes a new free block
-                    let new_free = (block_start + total_needed) as *mut FreeBlock;
-                    (*new_free).size = (*curr).size - total_needed;
-                    (*new_free).next = (*curr).next;
-                    (*prev_ptr) = new_free;
+            // 使用 ptr.read() 来安全读取 FreeBlock 数据
+            let current_block = unsafe { current.read() };
+            if current_block.size >= size + offset_to_aligned {
+                // 从链表中移除当前块
+                if prev.is_null() {
+                    self.set_free_list_head(current_block.next);
                 } else {
-                    // Use the entire block
-                    (*prev_ptr) = (*curr).next;
+                    unsafe { prev.write(FreeBlock {
+                        size: (*prev).size,
+                        next: current_block.next,
+                    }) };
                 }
-
-                // Write allocation header (FreeBlock with size only, next unused)
-                (*curr).size = total_needed;
-                return user_start as *mut u8;
+                
+                return align_addr as *mut u8;
             }
 
-            // Move to next block
-            prev_ptr = &mut (*curr).next as *mut _ as _;
-            curr = (*curr).next;
+            prev = current;
+            current = current_block.next;
         }
 
-        // Step 2: no suitable block found, allocate from bump region
-        let start = self.heap_start;
-        let end = self.heap_end;
 
-        // Align the user data start address
-        let align_mask = align - 1;
-        let user_start = (self.bump_next.load(core::sync::atomic::Ordering::Relaxed) 
-                          + core::mem::size_of::<FreeBlock>() + align_mask) & !align_mask;
-        let padding = user_start - (self.bump_next.load(core::sync::atomic::Ordering::Relaxed) 
-                                  + core::mem::size_of::<FreeBlock>());
-        let total_needed = core::mem::size_of::<FreeBlock>() + padding + size;
-        let new_bump = self.bump_next.load(core::sync::atomic::Ordering::Relaxed) + total_needed;
-
-        if new_bump > end {
-            return null_mut();
+        // TODO: Step 2 — no suitable block in free_list, allocate from bump region
+        //
+        // Same logic as 02_bump_allocator's alloc
+        loop {
+            let current = self.bump_next.load(core::sync::atomic::Ordering::SeqCst);
+            let align_addr = (current + align - 1) & !(align - 1);
+            let new_addr = align_addr + size;
+            if new_addr > self.heap_end {
+                return null_mut();
+            }
+            match self.bump_next.compare_exchange(
+                    current, 
+                    new_addr, 
+                    core::sync::atomic::Ordering::SeqCst, 
+                    core::sync::atomic::Ordering::SeqCst
+                ) {
+                Ok(_)=>{
+                    return align_addr as _;
+                },
+                Err(_)=>{
+                    continue;
+                }
+            }
         }
-
-        // Write allocation header
-        let header_ptr = self.bump_next.load(core::sync::atomic::Ordering::Relaxed) as *mut FreeBlock;
-        (*header_ptr).size = total_needed;
-        
-        // Update bump pointer
-        self.bump_next.store(new_bump, core::sync::atomic::Ordering::Relaxed);
-        user_start as *mut u8
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let size = layout.size().max(core::mem::size_of::<FreeBlock>());
-        let align = layout.align().max(core::mem::align_of::<FreeBlock>());
-        
-        // Calculate header position
-        let user_start = ptr as usize;
-        let align_mask = align - 1;
-        let header_addr = user_start - core::mem::size_of::<FreeBlock>();
-        let padding = user_start - (header_addr + core::mem::size_of::<FreeBlock>());
-        let total_size = core::mem::size_of::<FreeBlock>() + padding + size;
-        
-        // Cast to FreeBlock and insert at head
-        let block_ptr = header_addr as *mut FreeBlock;
-        (*block_ptr).size = total_size;
-        (*block_ptr).next = self.free_list_head();
-        self.set_free_list_head(block_ptr);
+
+        // TODO: Insert the freed block at the head of free_list
+        //
+        // Steps:
+        // 1. Cast ptr to *mut FreeBlock
+        // 2. Write FreeBlock { size, next: current list head }
+        // 3. Update free_list head to ptr
+        let free_block = ptr as *mut FreeBlock;
+        unsafe { free_block.write(FreeBlock {
+            size,
+            next: self.free_list_head(),
+        }) };
+
+        self.set_free_list_head(free_block);
     }
 }
 
