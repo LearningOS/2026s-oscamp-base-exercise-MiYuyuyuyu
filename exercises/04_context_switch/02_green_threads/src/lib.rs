@@ -1,22 +1,4 @@
-//! # Green Thread Scheduler (riscv64)
-//!
-//! In this exercise, you build a simple cooperative (green) thread scheduler on top of context switching.
-//! This crate is **riscv64 only**; run with the repo's normal flow (`./check.sh` / `oscamp`) or natively on riscv64.
-//!
-//! ## Key Concepts
-//! - Cooperative vs preemptive scheduling
-//! - Thread state: `Ready`, `Running`, `Finished`
-//! - `yield_now()`: current thread voluntarily gives up the CPU
-//! - Scheduler loop: pick next ready thread and switch to it
-//!
-//! ## Design
-//! Each green thread has its own stack and `TaskContext`. Threads call `yield_now()` to yield.
-//! The scheduler round-robins among ready threads. User entry is wrapped by `thread_wrapper`, which
-//! calls the entry then marks the thread `Finished` and switches back.
-
 #![cfg(target_arch = "riscv64")]
-
-use core::arch::naked_asm;
 
 /// Per-thread stack size. Slightly larger to avoid overflow under QEMU / test harness.
 const STACK_SIZE: usize = 1024 * 128;
@@ -61,7 +43,7 @@ static mut CURRENT_THREAD_ENTRY: Option<extern "C" fn()> = None;
 
 /// Wrapper run as the initial `ra` for each green thread: call the user entry (from `CURRENT_THREAD_ENTRY`), then mark Finished and switch back.
 extern "C" fn thread_wrapper() {
-    let entry = unsafe { core::ptr::read(&raw const CURRENT_THREAD_ENTRY) };
+    let entry = unsafe { CURRENT_THREAD_ENTRY };
     if let Some(f) = entry {
         unsafe { CURRENT_THREAD_ENTRY = None };
         f();
@@ -73,9 +55,9 @@ extern "C" fn thread_wrapper() {
 /// Zero `a0`/`a1` before `ret` so we don't leak pointers into the new context.
 ///
 /// Must be `#[unsafe(naked)]` to prevent the compiler from generating a prologue/epilogue.
-#[unsafe(naked)]
-unsafe extern "C" fn switch_context(_old: &mut TaskContext, _new: &TaskContext) {
-    naked_asm!(
+#[naked]
+pub unsafe extern "C" fn switch_context(_old: &mut TaskContext, _new: &TaskContext) {
+    core::arch::asm!(
         "sd sp, 0(a0)",
         "sd ra, 8(a0)",
         "sd s0, 16(a0)",
@@ -107,6 +89,7 @@ unsafe extern "C" fn switch_context(_old: &mut TaskContext, _new: &TaskContext) 
         "li a0, 0",
         "li a1, 0",
         "ret",
+        options(noreturn)
     );
 }
 
@@ -160,7 +143,6 @@ impl Scheduler {
         
         // 5. 添加到线程列表
         self.threads.push(thread);
-        // todo!("alloc stack, init ctx with ra=thread_wrapper and aligned sp, push GreenThread(Ready, entry)")
     }
 
     /// Run the scheduler until all threads (except the main one) are `Finished`.
@@ -169,12 +151,12 @@ impl Scheduler {
     /// 2. Loop: if all threads in `threads[1..]` are `Finished`, break; otherwise call `schedule_next()` (which may switch away and later return).
     /// 3. Clear `SCHEDULER` when done.
     pub fn run(&mut self) {
-        // todo!("set SCHEDULER to self, loop until threads[1..] all Finished, call schedule_next, then clear SCHEDULER")
+        // 设置全局调度器指针
         unsafe {
             SCHEDULER = self as *mut Scheduler;
         }
         
-        // 2. 调度循环
+        // 调度循环
         loop {
             // 检查是否所有非主线程都已完成
             let all_finished = self.threads[1..]
@@ -185,11 +167,11 @@ impl Scheduler {
                 break;
             }
             
-            // 3. 调度下一个线程
+            // 调度下一个线程
             self.schedule_next();
         }
         
-        // 4. 清除全局调度器指针
+        // 清除全局调度器指针
         unsafe {
             SCHEDULER = std::ptr::null_mut();
         }
@@ -197,7 +179,6 @@ impl Scheduler {
 
     /// Find the next ready thread (starting from `current + 1` round-robin), mark current as `Ready` (if not `Finished`), mark next as `Running`, set `CURRENT_THREAD_ENTRY` if the next thread has an entry, then switch to it.
     fn schedule_next(&mut self) {
-        // todo!("round-robin find next Ready, set current Ready (if not Finished), next Running, CURRENT_THREAD_ENTRY, then switch_context")
         let thread_count = self.threads.len();
         if thread_count <= 1 {
             return;  // 只有主线程，不需要调度
@@ -230,8 +211,9 @@ impl Scheduler {
         self.threads[next_idx].state = ThreadState::Running;
         
         // 5. 设置下一个线程的入口函数（如果它有一个入口）
-        if let Some(entry) = self.threads[next_idx].entry {
-            unsafe {
+        unsafe {
+            CURRENT_THREAD_ENTRY = None;  // 先清除
+            if let Some(entry) = self.threads[next_idx].entry {
                 CURRENT_THREAD_ENTRY = Some(entry);
             }
         }
@@ -246,15 +228,6 @@ impl Scheduler {
         unsafe {
             switch_context(old_ctx, new_ctx);
         }
-    }
-}
-
-impl TaskContext {
-    fn as_mut_ptr(&mut self) -> *mut TaskContext {
-        self as *mut TaskContext
-    }
-    fn as_ptr(&self) -> *const TaskContext {
-        self as *const TaskContext
     }
 }
 
