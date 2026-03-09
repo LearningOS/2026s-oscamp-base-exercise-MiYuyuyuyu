@@ -58,10 +58,10 @@ impl TaskContext {
 /// In asm: store `sp`, `ra`, `s0`–`s11` to `[a0]` (old), load from `[a1]` (new), zero `a0`/`a1` so we do not leak pointers into the new context, then `ret`.
 ///
 /// Must be `#[unsafe(naked)]` to prevent the compiler from generating a prologue/epilogue.
-#[naked]
+#[unsafe(naked)]
 pub unsafe extern "C" fn switch_context(_old: &mut TaskContext, _new: &TaskContext) {
-    core::arch::asm!(
-        // 保存当前上下文到 old (a0)
+    core::arch::naked_asm!(
+        // 保存当前上下文到 old
         "sd sp, 0(a0)",
         "sd ra, 8(a0)",
         "sd s0, 16(a0)",
@@ -76,8 +76,8 @@ pub unsafe extern "C" fn switch_context(_old: &mut TaskContext, _new: &TaskConte
         "sd s9, 88(a0)",
         "sd s10, 96(a0)",
         "sd s11, 104(a0)",
-        
-        // 从 new (a1) 加载上下文
+
+        // 从 new 加载上下文
         "ld sp, 0(a1)",
         "ld ra, 8(a1)",
         "ld s0, 16(a1)",
@@ -92,16 +92,16 @@ pub unsafe extern "C" fn switch_context(_old: &mut TaskContext, _new: &TaskConte
         "ld s9, 88(a1)",
         "ld s10, 96(a1)",
         "ld s11, 104(a1)",
-        
-        // 清零 a0 和 a1，避免指针泄漏
+
+        // 清零 a0 / a1，避免把旧上下文指针带入新任务
         "mv a0, zero",
         "mv a1, zero",
-        
-        // 跳转到新任务的入口点
+
+        // 跳到 new.ra
         "ret",
-        options(noreturn)
     );
 }
+
 
 const STACK_SIZE: usize = 1024 * 64;
 
